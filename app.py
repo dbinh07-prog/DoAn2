@@ -8,6 +8,7 @@ import re
 import io
 import zipfile
 import xml.etree.ElementTree as ET
+import os
 from datetime import datetime
 
 # Thư viện biểu đồ
@@ -23,44 +24,51 @@ from webdriver_manager.chrome import ChromeDriverManager
 from google.generativeai.types import HarmCategory, HarmBlockThreshold, GenerationConfig
 
 # ==============================================================================
-# 1. CẤU HÌNH & CSS (DARK MODE - UI CHUẨN)
+# 1. CẤU HÌNH & CSS (DARK MODE - UI TINH TẾ)
 # ==============================================================================
 st.set_page_config(page_title="AI Insight Universal", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
     .stApp { background-color: #0E1117; color: white; }
+    
     .hero-title { 
         font-family: 'Segoe UI', sans-serif; font-size: 3rem; font-weight: 700; 
         color: #4CAF50; margin-bottom: 5px; text-align: left;
     }
     .hero-subtitle { font-size: 1rem; color: #888; margin-bottom: 40px; font-style: italic; text-align: left;}
+
     .feature-card { 
         background-color: #161B22; border: 1px solid #30363D; 
         padding: 20px; border-radius: 10px; text-align: center; height: 100%; 
     }
+    
     .stButton > button { 
         background-color: #FF4B4B; color: white; border: none; border-radius: 6px; 
         font-weight: bold; height: 45px; width: 100%; font-size: 16px;
     }
     .stButton > button:hover { background-color: #D32F2F; }
+
     [data-testid="stSidebar"] { background-color: #161B22; border-right: 1px solid #30363D; }
+    
     div.stButton > button.history-btn {
         background-color: #21262D; border: 1px solid #30363D; color: #ddd;
         text-align: left; padding: 10px; height: auto; font-size: 14px;
         margin-bottom: 5px; width: 100%;
     }
     div.stButton > button.history-btn:hover { border-color: #4CAF50; color: #4CAF50; }
+
     .metric-box { background-color: #21262D; border: 1px solid #30363D; padding: 15px; border-radius: 8px; text-align: center; }
     .metric-num { font-size: 24px; font-weight: bold; color: #4CAF50; }
     .metric-lbl { font-size: 12px; color: #8B949E; text-transform: uppercase; margin-top: 5px; }
+    
     [data-testid="stFileUploader"] section { background-color: #161B22; border: 1px dashed #4CAF50; }
 </style>
 """, unsafe_allow_html=True)
 
 # KEY TÍCH HỢP SẴN
 MY_API_KEY = "AIzaSyCngLZhTY4tm3uIFZyMozhf71xOCBBj2E4"
-DB_NAME = 'universal_v53_svg_readded.db'
+DB_NAME = 'universal_v54_cloud_fix.db'
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -95,7 +103,7 @@ def process_uploaded_file(uploaded_file):
     except Exception as e: return f"Lỗi: {str(e)}"
 
 # ==============================================================================
-# 3. CÀO WEB (CÓ LOGIC SVG CHUYÊN BIỆT)
+# 3. CÀO WEB (ĐÃ SỬA ĐỂ CHẠY ĐƯỢC TRÊN CLOUD)
 # ==============================================================================
 def get_web_content_selenium(url, max_pages=15):
     driver = None
@@ -106,11 +114,21 @@ def get_web_content_selenium(url, max_pages=15):
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--no-sandbox")
+        # Thêm dòng này để fix lỗi crash trên Cloud/Docker
+        chrome_options.add_argument("--disable-dev-shm-usage") 
         chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        # --- LOGIC TỰ ĐỘNG CHỌN DRIVER (QUAN TRỌNG) ---
+        try:
+            # Cách 1: Chạy Local (Windows/Mac) - Tự tải Driver
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+        except:
+            # Cách 2: Chạy Cloud (Linux) - Dùng Driver có sẵn trong packages.txt
+            chrome_options.binary_location = "/usr/bin/chromium"
+            service = Service("/usr/bin/chromedriver")
+            driver = webdriver.Chrome(service=service, options=chrome_options)
         
         st.toast(f"🌐 Đang truy cập: {url}")
         driver.get(url)
@@ -118,13 +136,11 @@ def get_web_content_selenium(url, max_pages=15):
         
         # --- BƯỚC 1: MỞ RỘNG (Xem tất cả) ---
         try:
-            # Cuộn xuống giữa trang
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 2);")
             time.sleep(1)
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight - 1200);")
             time.sleep(1)
             
-            # Tìm nút "Xem ... đánh giá"
             see_all = driver.find_elements(By.XPATH, """
                 //a[contains(text(), 'Xem') and contains(text(), 'đánh giá')] |
                 //button[contains(text(), 'Xem') and contains(text(), 'đánh giá')] |
@@ -147,7 +163,7 @@ def get_web_content_selenium(url, max_pages=15):
                 st.toast("⚠️ Không thấy nút mở rộng, thử quét luôn.")
         except: pass
 
-        # --- BƯỚC 2: LẬT TRANG (SĂN SVG) ---
+        # --- BƯỚC 2: LẬT TRANG (SVG + SỐ) ---
         page = 1
         while page <= max_pages:
             # A. Hút dữ liệu
@@ -167,16 +183,13 @@ def get_web_content_selenium(url, max_pages=15):
                 clicked = False
                 next_page = page + 1
                 
-                # === ƯU TIÊN SỐ 1: TÌM SVG (CÁI MÀY CẦN) ===
-                # Tìm thẻ SVG có class chứa 'Pagination' (như ảnh mày gửi)
+                # ƯU TIÊN 1: TÌM THẺ SVG
                 svg_icons = driver.find_elements(By.XPATH, "//*[name()='svg' and contains(@class, 'Pagination')]")
                 visible_svgs = [icon for icon in svg_icons if icon.is_displayed()]
                 
                 if visible_svgs:
-                    # Lấy cái cuối cùng (thường là nút Next)
                     next_svg = visible_svgs[-1]
                     try:
-                        # Thử bấm vào thẻ cha (thẻ a/li) trước
                         parent = next_svg.find_element(By.XPATH, "./..")
                         driver.execute_script("arguments[0].click();", parent)
                         st.toast(f"⚡ Bấm SVG Next (Trang {next_page})...")
@@ -184,7 +197,6 @@ def get_web_content_selenium(url, max_pages=15):
                         clicked = True
                         page += 1
                     except:
-                        # Nếu không được thì bấm thẳng vào SVG
                         try:
                             driver.execute_script("arguments[0].click();", next_svg)
                             st.toast(f"⚡ Bấm thẳng SVG (Trang {next_page})...")
@@ -193,7 +205,7 @@ def get_web_content_selenium(url, max_pages=15):
                             page += 1
                         except: pass
 
-                # === ƯU TIÊN 2: TÌM SỐ TRANG ===
+                # ƯU TIÊN 2: TÌM SỐ TRANG
                 if not clicked:
                     next_num_btns = driver.find_elements(By.XPATH, f"//ul//li//a[text()='{next_page}'] | //div//a[text()='{next_page}']")
                     for btn in next_num_btns:
@@ -205,7 +217,7 @@ def get_web_content_selenium(url, max_pages=15):
                             page += 1
                             break
                 
-                # === ƯU TIÊN 3: TÌM NÚT TEXT ">" ===
+                # ƯU TIÊN 3: TÌM NÚT TEXT ">"
                 if not clicked:
                     arrows = driver.find_elements(By.XPATH, "//li[contains(@class,'next')]/a | //a[contains(text(), '>')]")
                     for arr in arrows:
@@ -227,7 +239,7 @@ def get_web_content_selenium(url, max_pages=15):
         if driver: driver.quit()
 
 # ==============================================================================
-# 4. AI PHÂN TÍCH (GEMINI 2.5 LITE & GEMMA 3)
+# 4. AI PHÂN TÍCH (GEMINI 2.5 FLASH LITE & GEMMA 3)
 # ==============================================================================
 def analyze_content(text):
     genai.configure(api_key=MY_API_KEY)
@@ -256,6 +268,7 @@ def analyze_content(text):
     3. Phân tích câu từ rồi Phân loại ra 4 nhóm: Tích cực, Tiêu cực, Trung lập, Thắc mắc.
     4. Đếm Topic (Chủ đề được người dùng nhắc tới).
     5. Đưa ra giải pháp cho cửa hàng để khắc phục các vấn đề gặp phải.
+
 
     Output JSON strict:
     {{
@@ -320,7 +333,7 @@ with st.sidebar:
                         st.session_state['analysis_result'] = json.loads(row['result_json'])
                         st.session_state['source_url'] = row['url']
                         st.rerun()
-                    except: pass
+                    except: st.error("Lỗi tải lịch sử")
         else:
             st.info("Chưa có lịch sử.")
     except Exception as e: st.error(f"Lỗi DB: {e}")
@@ -338,13 +351,13 @@ if 'analysis_result' not in st.session_state: st.session_state['analysis_result'
 if 'source_url' not in st.session_state: st.session_state['source_url'] = ""
 
 if st.session_state['analysis_result'] is None:
-    st.markdown('<div class="hero-title">AI Insight Analyser</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="hero-subtitle">Phân tích bình luận từ các nguồn thông tin</div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero-title">AI Insight Universal</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="hero-subtitle">Model: Gemini 2.5 Flash Lite • Quét đa năng mọi nền tảng</div>', unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns(3)
     with c1: st.markdown('<div class="feature-card">🕷️ <b>Quét Đa Năng</b><br><span style="font-size:12px;color:#888">Tự động quét trên mọi web.</span></div>', unsafe_allow_html=True)
     with c2: st.markdown('<div class="feature-card">⚡ <b>Gemini 2.5 Lite</b><br><span style="font-size:12px;color:#888">Model mới nhất, tốc độ cao, chính xác.</span></div>', unsafe_allow_html=True)
-    with c3: st.markdown('<div class="feature-card">📊 <b>Báo Cáo </b><br><span style="font-size:12px;color:#888">Phân loại bình luận & Xuất file Excel.</span></div>', unsafe_allow_html=True)
+    with c3: st.markdown('<div class="feature-card">📊 <b>Báo Cáo</b><br><span style="font-size:12px;color:#888">Phân loại bình luận & Xuất file Excel.</span></div>', unsafe_allow_html=True)
     
     st.write("")
     tab_link, tab_file = st.tabs(["🔗 NHẬP LINK", "📁 NẠP FILE DỮ LIỆU"])
@@ -356,7 +369,7 @@ if st.session_state['analysis_result'] is None:
                 with st.status(f"🕷️ Đang quét dữ liệu ({page_limit} trang)...", expanded=True) as status:
                     fetched = get_web_content_selenium(url_input, max_pages=page_limit)
                     if fetched and len(fetched) > 1000:
-                        status.write(f"✅ Đã tải xong! Tổng dung lượng: {len(fetched)} ký tự. Đang phân tích...")
+                        status.write(f"✅ Đã tải xong! Tổng dung lượng: {len(fetched)} ký tự. Đang gửi AI...")
                         res = analyze_content(fetched)
                         st.session_state['analysis_result'] = res
                         st.session_state['source_url'] = url_input
@@ -370,7 +383,7 @@ if st.session_state['analysis_result'] is None:
                         st.rerun()
                     else:
                         status.update(label="❌ Thất bại", state="error")
-                        st.error("Không lấy được dữ liệu.")
+                        st.error("Không lấy được dữ liệu. Kiểm tra xem đã tạo file packages.txt chưa.")
             else: st.warning("Vui lòng nhập Link!")
     
     with tab_file:
