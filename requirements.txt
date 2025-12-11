@@ -2,3 +2,4 @@ google-generativeai
 streamlit
 plotly
 selenium
+webdriver-manager
