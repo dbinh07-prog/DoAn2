@@ -22,7 +22,6 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.core.os_manager import ChromeType
 from google.generativeai.types import HarmCategory, HarmBlockThreshold, GenerationConfig
 
 # ==============================================================================
@@ -33,26 +32,13 @@ st.set_page_config(page_title="AI Insight Universal", page_icon="💎", layout="
 st.markdown("""
 <style>
     .stApp { background-color: #0E1117; color: white; }
-    .hero-title { 
-        font-family: 'Segoe UI', sans-serif; font-size: 3rem; font-weight: 700; 
-        color: #4CAF50; margin-bottom: 5px; text-align: left;
-    }
+    .hero-title { font-family: 'Segoe UI', sans-serif; font-size: 3rem; font-weight: 700; color: #4CAF50; margin-bottom: 5px; text-align: left; }
     .hero-subtitle { font-size: 1rem; color: #888; margin-bottom: 40px; font-style: italic; text-align: left;}
-    .feature-card { 
-        background-color: #161B22; border: 1px solid #30363D; 
-        padding: 20px; border-radius: 10px; text-align: center; height: 100%; 
-    }
-    .stButton > button { 
-        background-color: #FF4B4B; color: white; border: none; border-radius: 6px; 
-        font-weight: bold; height: 45px; width: 100%; font-size: 16px;
-    }
+    .feature-card { background-color: #161B22; border: 1px solid #30363D; padding: 20px; border-radius: 10px; text-align: center; height: 100%; }
+    .stButton > button { background-color: #FF4B4B; color: white; border: none; border-radius: 6px; font-weight: bold; height: 45px; width: 100%; font-size: 16px; }
     .stButton > button:hover { background-color: #D32F2F; }
     [data-testid="stSidebar"] { background-color: #161B22; border-right: 1px solid #30363D; }
-    div.stButton > button.history-btn {
-        background-color: #21262D; border: 1px solid #30363D; color: #ddd;
-        text-align: left; padding: 10px; height: auto; font-size: 14px;
-        margin-bottom: 5px; width: 100%;
-    }
+    div.stButton > button.history-btn { background-color: #21262D; border: 1px solid #30363D; color: #ddd; text-align: left; padding: 10px; height: auto; font-size: 14px; margin-bottom: 5px; width: 100%; }
     div.stButton > button.history-btn:hover { border-color: #4CAF50; color: #4CAF50; }
     .metric-box { background-color: #21262D; border: 1px solid #30363D; padding: 15px; border-radius: 8px; text-align: center; }
     .metric-num { font-size: 24px; font-weight: bold; color: #4CAF50; }
@@ -61,9 +47,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# KEY TÍCH HỢP SẴN
 MY_API_KEY = "AIzaSyCngLZhTY4tm3uIFZyMozhf71xOCBBj2E4"
-DB_NAME = 'universal_v55_cloud_final.db'
+DB_NAME = 'universal_v56_debug.db'
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -98,11 +83,12 @@ def process_uploaded_file(uploaded_file):
     except Exception as e: return f"Lỗi: {str(e)}"
 
 # ==============================================================================
-# 3. CÀO WEB (CẤU HÌNH CLOUD CHUẨN MỰC)
+# 3. CÀO WEB (CẤU HÌNH CLOUD + HIỂN THỊ LỖI CHI TIẾT)
 # ==============================================================================
 def get_web_content_selenium(url, max_pages=15):
     driver = None
     collected_data = []
+    error_log = ""
     
     try:
         chrome_options = Options()
@@ -111,48 +97,45 @@ def get_web_content_selenium(url, max_pages=15):
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--window-size=1920,1080")
-        chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         
-        # --- LOGIC TỰ ĐỘNG TÌM DRIVER (FIX LỖI CLOUD) ---
-        try:
-            # Ưu tiên tìm Chromium trên Cloud
-            if os.path.exists("/usr/bin/chromium"):
-                chrome_options.binary_location = "/usr/bin/chromium"
-                service = Service("/usr/bin/chromedriver") # Thử đường dẫn mặc định
-                
-                # Nếu không có driver sẵn, dùng webdriver-manager cài đặt
-                if not os.path.exists("/usr/bin/chromedriver"):
-                     service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
-            else:
-                # Chạy Local (Windows/Mac)
+        # --- LOGIC CHỌN DRIVER (ƯU TIÊN CLOUD) ---
+        service = None
+        
+        # Kiểm tra xem có phải đang chạy trên Cloud (Linux có Chromium) không
+        if os.path.exists("/usr/bin/chromium"):
+            chrome_options.binary_location = "/usr/bin/chromium"
+            service = Service("/usr/bin/chromedriver")
+        else:
+            # Nếu không tìm thấy Chromium hệ thống, dùng Webdriver Manager (cho máy cá nhân)
+            try:
                 service = Service(ChromeDriverManager().install())
-            
+            except:
+                pass
+
+        if service:
             driver = webdriver.Chrome(service=service, options=chrome_options)
-            
-        except Exception as e:
-            # Fallback cuối cùng: Cố gắng cài lại driver chuẩn
-            service = Service(ChromeDriverManager().install())
-            driver = webdriver.Chrome(service=service, options=chrome_options)
+        else:
+            # Fallback cuối cùng
+            driver = webdriver.Chrome(options=chrome_options)
         
         st.toast(f"🌐 Đang truy cập: {url}")
         driver.get(url)
         time.sleep(5)
         
-        # --- BƯỚC 1: MỞ RỘNG (Xem tất cả) ---
+        # --- CHIẾN THUẬT: CUỘN TỪ TỪ ---
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 2);")
+        time.sleep(1)
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(2)
+
+        # --- BƯỚC 1: MỞ RỘNG ---
         try:
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 2);")
-            time.sleep(1)
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight - 1200);")
-            time.sleep(1)
-            
             see_all = driver.find_elements(By.XPATH, """
                 //a[contains(text(), 'Xem') and contains(text(), 'đánh giá')] |
                 //button[contains(text(), 'Xem') and contains(text(), 'đánh giá')] |
                 //div[contains(text(), 'Xem') and contains(text(), 'đánh giá')]//a |
                 //a[contains(@class, 'btn-view-all')]
             """)
-            
-            clicked_open = False
             for btn in see_all:
                 if btn.is_displayed():
                     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
@@ -160,11 +143,7 @@ def get_web_content_selenium(url, max_pages=15):
                     driver.execute_script("arguments[0].click();", btn)
                     st.toast("⚡ Đã bấm nút mở rộng...")
                     time.sleep(4)
-                    clicked_open = True
                     break
-            
-            if not clicked_open:
-                st.toast("⚠️ Không thấy nút mở rộng, thử quét luôn.")
         except: pass
 
         # --- BƯỚC 2: LẬT TRANG (SVG + SỐ) ---
@@ -185,29 +164,20 @@ def get_web_content_selenium(url, max_pages=15):
                 clicked = False
                 next_page = page + 1
                 
-                # ƯU TIÊN 1: TÌM THẺ SVG
+                # SVG (Priority 1)
                 svg_icons = driver.find_elements(By.XPATH, "//*[name()='svg' and contains(@class, 'Pagination')]")
                 visible_svgs = [icon for icon in svg_icons if icon.is_displayed()]
-                
                 if visible_svgs:
                     next_svg = visible_svgs[-1]
                     try:
-                        parent = next_svg.find_element(By.XPATH, "./..")
-                        driver.execute_script("arguments[0].click();", parent)
+                        driver.execute_script("arguments[0].click();", next_svg)
                         st.toast(f"⚡ Bấm SVG Next (Trang {next_page})...")
                         time.sleep(4)
                         clicked = True
                         page += 1
-                    except:
-                        try:
-                            driver.execute_script("arguments[0].click();", next_svg)
-                            st.toast(f"⚡ Bấm thẳng SVG (Trang {next_page})...")
-                            time.sleep(4)
-                            clicked = True
-                            page += 1
-                        except: pass
+                    except: pass
 
-                # ƯU TIÊN 2: TÌM SỐ TRANG
+                # Số trang (Priority 2)
                 if not clicked:
                     next_num_btns = driver.find_elements(By.XPATH, f"//ul//li//a[text()='{next_page}'] | //div//a[text()='{next_page}']")
                     for btn in next_num_btns:
@@ -219,29 +189,18 @@ def get_web_content_selenium(url, max_pages=15):
                             page += 1
                             break
                 
-                # ƯU TIÊN 3: TÌM NÚT TEXT ">"
-                if not clicked:
-                    arrows = driver.find_elements(By.XPATH, "//li[contains(@class,'next')]/a | //a[contains(text(), '>')]")
-                    for arr in arrows:
-                        if arr.is_displayed():
-                            driver.execute_script("arguments[0].click();", arr)
-                            st.toast("⚡ Bấm Next...")
-                            time.sleep(4)
-                            clicked = True
-                            page += 1
-                            break
-
                 if not clicked: break
             except: break
         
-        return "\n".join(collected_data)[:600000]
+        return "\n".join(collected_data)[:600000], None
 
-    except Exception as e: return None
+    except Exception as e: 
+        return None, str(e) # Trả về lỗi chi tiết
     finally:
         if driver: driver.quit()
 
 # ==============================================================================
-# 4. AI PHÂN TÍCH (GEMINI 2.5 FLASH LITE & GEMMA 3)
+# 4. AI PHÂN TÍCH
 # ==============================================================================
 def analyze_content(text):
     genai.configure(api_key=MY_API_KEY)
@@ -326,7 +285,6 @@ with st.sidebar:
     conn = sqlite3.connect(DB_NAME)
     try:
         df_hist = pd.read_sql('SELECT id, time, product_name, result_json, url FROM analyses ORDER BY id DESC LIMIT 10', conn)
-        
         if not df_hist.empty:
             for index, row in df_hist.iterrows():
                 btn_label = f"{row['time']} - {row['product_name'][:15]}..."
@@ -354,12 +312,12 @@ if 'source_url' not in st.session_state: st.session_state['source_url'] = ""
 
 if st.session_state['analysis_result'] is None:
     st.markdown('<div class="hero-title">AI Insight Universal</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="hero-subtitle">Phân tích Feedback thông minh!</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="hero-subtitle">Model: Gemini 2.5 Flash Lite • Quét đa năng mọi nền tảng</div>', unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns(3)
-    with c1: st.markdown('<div class="feature-card">🕷️ <b>Quét Đa Năng</b><br><span style="font-size:12px;color:#888">Tự động quét trên mọi web.</span></div>', unsafe_allow_html=True)
+    with c1: st.markdown('<div class="feature-card">🕷️ <b>Quét Đa Năng</b><br><span style="font-size:12px;color:#888">Tự động bấm nút Xem thêm trên mọi web.</span></div>', unsafe_allow_html=True)
     with c2: st.markdown('<div class="feature-card">⚡ <b>Gemini 2.5 Lite</b><br><span style="font-size:12px;color:#888">Model mới nhất, tốc độ cao, chính xác.</span></div>', unsafe_allow_html=True)
-    with c3: st.markdown('<div class="feature-card">📊 <b>Báo Cáo</b><br><span style="font-size:12px;color:#888">Phân loại bình luận & Xuất Excel.</span></div>', unsafe_allow_html=True)
+    with c3: st.markdown('<div class="feature-card">📊 <b>Báo Cáo Sâu</b><br><span style="font-size:12px;color:#888">Phân loại 4 nhóm & Xuất Excel.</span></div>', unsafe_allow_html=True)
     
     st.write("")
     tab_link, tab_file = st.tabs(["🔗 NHẬP LINK", "📁 NẠP FILE DỮ LIỆU"])
@@ -369,7 +327,9 @@ if st.session_state['analysis_result'] is None:
         if st.button("🚀 BẮT ĐẦU PHÂN TÍCH", use_container_width=True):
             if url_input:
                 with st.status(f"🕷️ Đang quét dữ liệu ({page_limit} trang)...", expanded=True) as status:
-                    fetched = get_web_content_selenium(url_input, max_pages=page_limit)
+                    # GỌI HÀM CÀO DỮ LIỆU
+                    fetched, error_msg = get_web_content_selenium(url_input, max_pages=page_limit)
+                    
                     if fetched and len(fetched) > 1000:
                         status.write(f"✅ Đã tải xong! Tổng dung lượng: {len(fetched)} ký tự. Đang gửi AI...")
                         res = analyze_content(fetched)
@@ -385,7 +345,12 @@ if st.session_state['analysis_result'] is None:
                         st.rerun()
                     else:
                         status.update(label="❌ Thất bại", state="error")
-                        st.error("Không lấy được dữ liệu. Hãy kiểm tra lại link hoặc file packages.txt trên Cloud.")
+                        # HIỂN THỊ LỖI CHI TIẾT
+                        if error_msg:
+                            st.error(f"Lỗi hệ thống: {error_msg}")
+                            st.info("💡 Mẹo: Hãy chắc chắn bạn đã tạo file packages.txt trên GitHub.")
+                        else:
+                            st.error("Không lấy được dữ liệu. Trang web có thể đang chặn hoặc trống.")
             else: st.warning("Vui lòng nhập Link!")
     
     with tab_file:
@@ -460,7 +425,7 @@ else:
             else: st.info("Chưa có dữ liệu chủ đề.")
 
         st.write("---")
-        t1, t2, t3, t4 = st.tabs(["🟢 Khen", "🔴 Góp ý", "🟡 Trung lập", "🔵 Hỏi đáp"])
+        t1, t2, t3, t4 = st.tabs(["🟢 Khen", "🔴 Chê", "🟡 Trung lập", "🔵 Hỏi đáp"])
         with t1: 
             for r in pos: st.success(f"👍 {r}")
         with t2: 
