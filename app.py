@@ -8,7 +8,8 @@ import re
 import io
 import zipfile
 import xml.etree.ElementTree as ET
-import random # Cần thêm thư viện này để đảo key
+import os
+import shutil
 from datetime import datetime
 
 # Thư viện biểu đồ
@@ -24,9 +25,9 @@ from webdriver_manager.chrome import ChromeDriverManager
 from google.generativeai.types import HarmCategory, HarmBlockThreshold, GenerationConfig
 
 # ==============================================================================
-# 1. CẤU HÌNH & CSS (DARK MODE - UI CHUẨN)
+# 1. CẤU HÌNH & CSS (DARK MODE - UI CHUẨN ẢNH)
 # ==============================================================================
-st.set_page_config(page_title="AI Insight Analyser", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="AI Insight Universal", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -45,14 +46,14 @@ st.markdown("""
         padding: 20px; border-radius: 10px; text-align: center; height: 100%; 
     }
     
-    /* Nút Phân Tích (Đỏ) */
+    /* Nút Phân Tích (ĐỎ CAM) */
     .stButton > button { 
         background-color: #FF4B4B; color: white; border: none; border-radius: 6px; 
         font-weight: bold; height: 45px; width: 100%; font-size: 16px;
     }
     .stButton > button:hover { background-color: #D32F2F; }
 
-    /* Sidebar Styling */
+    /* Sidebar */
     [data-testid="stSidebar"] { background-color: #161B22; border-right: 1px solid #30363D; }
     
     /* History Button */
@@ -61,9 +62,8 @@ st.markdown("""
         text-align: left; padding: 10px; height: auto; font-size: 14px;
         margin-bottom: 5px; width: 100%;
     }
-    div.stButton > button.history-btn:hover { border-color: #4CAF50; color: #4CAF50; }
-
-    /* Metric Box */
+    
+    /* Metrics */
     .metric-box { background-color: #21262D; border: 1px solid #30363D; padding: 15px; border-radius: 8px; text-align: center; }
     .metric-num { font-size: 24px; font-weight: bold; color: #4CAF50; }
     .metric-lbl { font-size: 12px; color: #8B949E; text-transform: uppercase; margin-top: 5px; }
@@ -73,16 +73,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ==============================================================================
-# 🔑 DANH SÁCH 3 API KEY CỦA BẠN (ĐIỀN VÀO ĐÂY)
-# ==============================================================================
-API_KEYS = [
-    "AIzaSyCngLZhTY4tm3uIFZyMozhf71xOCBBj2E4",  # Key 1 (Mặc định)
-    "AIzaSyB5tESWUzp4ghSkhOynVnr44-cpxnLXy-A"
-]
-# ==============================================================================
-
-DB_NAME = 'universal_v51_multikey.db'
+# API KEY TỪ FILE BẠN GỬI
+MY_API_KEY = "AIzaSyDcaYZe7v1d-60ayRZ44fLoEZ3_VJPCcYI" 
+DB_NAME = 'universal_v61_deploy_master.db'
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -111,106 +104,131 @@ def process_uploaded_file(uploaded_file):
     try:
         if uploaded_file.name.endswith('.csv'): return pd.read_csv(uploaded_file).to_string()
         elif uploaded_file.name.endswith(('.xls', '.xlsx')): return pd.read_excel(uploaded_file).to_string()
-        elif uploaded_file.name.endswith('.txt'): return uploaded_file.read().decode("utf-8")
+        elif uploaded_file.name.endswith('.txt'): return uploaded_file.read().decode("utf-8", errors='ignore')
         elif uploaded_file.name.endswith('.docx'): return read_docx(uploaded_file)
         return None
     except Exception as e: return f"Lỗi: {str(e)}"
 
 # ==============================================================================
-# 3. CÀO WEB (LOGIC FINAL: SVG + SCROLL + DRILL)
+# 3. CÀO WEB (CẤU HÌNH CLOUD CHUẨN & LOGIC FPT)
 # ==============================================================================
 def get_web_content_selenium(url, max_pages=15):
     driver = None
     collected_data = []
     
+    if url and not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
+    
     try:
         chrome_options = Options()
-        chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--headless=new") 
         chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         
-        service = Service(ChromeDriverManager().install())
+        # --- QUAN TRỌNG: LOGIC CHỌN DRIVER CHO CLOUD ---
+        service = None
+        # Kiểm tra xem có phải môi trường Cloud (Linux) không
+        if os.path.exists("/usr/bin/chromium"):
+            chrome_options.binary_location = "/usr/bin/chromium"
+            # BẮT BUỘC dùng driver có sẵn, KHÔNG dùng webdriver_manager tải bản mới (gây lỗi version)
+            service = Service("/usr/bin/chromedriver")
+        else:
+            # Môi trường Local (Windows/Mac) -> Tự tải
+            service = Service(ChromeDriverManager().install())
+
         driver = webdriver.Chrome(service=service, options=chrome_options)
         
         st.toast(f"🌐 Đang truy cập: {url}")
         driver.get(url)
         time.sleep(5)
         
-        # --- BƯỚC 1: TÌM VÀ BẤM NÚT "XEM ... ĐÁNH GIÁ" ---
+        # --- CHIẾN THUẬT CUỘN CHẬM (Cho Laptop FPT load script) ---
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 3);")
+        time.sleep(1)
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 1.5);")
+        time.sleep(1)
+        
+        # --- BƯỚC 1: TÌM VÀ BẤM NÚT "XEM ĐÁNH GIÁ" ---
         try:
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 2);")
-            time.sleep(2)
-            drill_btns = driver.find_elements(By.XPATH, """
+            # Thử tìm vùng chứa đánh giá trước
+            try:
+                review_area = driver.find_element(By.XPATH, "//*[contains(text(), 'Đánh giá sản phẩm') or contains(text(), 'Khách hàng chấm điểm')]")
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", review_area)
+                time.sleep(2)
+            except: pass
+
+            # Các loại nút mở rộng (Laptop FPT hay dùng class c-btn-rate)
+            see_all = driver.find_elements(By.XPATH, """
                 //a[contains(text(), 'Xem') and contains(text(), 'đánh giá')] |
                 //button[contains(text(), 'Xem') and contains(text(), 'đánh giá')] |
+                //div[contains(@class, 'c-rate__center')]//a |
                 //a[contains(@class, 'btn-view-all')] |
-                //div[contains(@class, 'c-rate__center')]//a
+                //a[contains(@class, 'c-btn-rate')]
             """)
-            for btn in drill_btns:
+            
+            clicked_open = False
+            for btn in see_all:
                 if btn.is_displayed():
-                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
-                    time.sleep(1)
                     driver.execute_script("arguments[0].click();", btn)
-                    st.toast("⚡ Đã bấm nút mở rộng danh sách...")
-                    time.sleep(4)
+                    st.toast("⚡ Đã bấm nút mở rộng...")
+                    time.sleep(5) # Chờ load popup/trang mới
+                    clicked_open = True
                     break
+            
+            if not clicked_open:
+                st.toast("⚠️ Quét trang hiện tại (Không thấy nút mở rộng).")
         except: pass
 
         # --- BƯỚC 2: LẬT TRANG (SVG + SỐ) ---
         page = 1
         while page <= max_pages:
-            # A. Hút dữ liệu
             try:
-                try:
-                    content = driver.find_element(By.CSS_SELECTOR, "div.f-cm-list, div.card-body, div.re-list").text
-                except:
-                    content = driver.find_element(By.TAG_NAME, "body").text
+                # Lấy toàn bộ body text (An toàn nhất để không sót)
+                content = driver.find_element(By.TAG_NAME, "body").text
                 collected_data.append(f"\n--- PAGE {page} ---\n{content}")
             except: pass
 
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight - 600);")
             time.sleep(1.5)
 
-            # B. Tìm trang tiếp theo
             try:
                 clicked = False
                 next_page = page + 1
                 
-                # ƯU TIÊN 1: SVG (Pagination_svgIcon)
-                svg_icons = driver.find_elements(By.XPATH, "//*[name()='svg' and contains(@class, 'Pagination_svgIcon')]")
-                visible_svgs = [icon for icon in svg_icons if icon.is_displayed()]
-                
-                if visible_svgs:
-                    next_svg = visible_svgs[-1]
+                # SVG (Ưu tiên)
+                svg_icons = driver.find_elements(By.XPATH, "//*[name()='svg' and contains(@class, 'Pagination')]")
+                vis_svgs = [x for x in svg_icons if x.is_displayed()]
+                if vis_svgs:
                     try:
-                        driver.execute_script("arguments[0].click();", next_svg)
-                        st.toast(f"⚡ Bấm SVG Next (Trang {next_page})...")
+                        driver.execute_script("arguments[0].click();", vis_svgs[-1])
+                        st.toast(f"⚡ SVG Next ({next_page})...")
                         time.sleep(4)
                         clicked = True
                         page += 1
                     except: pass
 
-                # ƯU TIÊN 2: SỐ TRANG
+                # Số trang
                 if not clicked:
-                    next_num_btns = driver.find_elements(By.XPATH, f"//a[text()='{next_page}'] | //li[text()='{next_page}']")
-                    for btn in next_num_btns:
-                        if btn.is_displayed():
-                            driver.execute_script("arguments[0].click();", btn)
-                            st.toast(f"⚡ Sang trang {next_page}...")
+                    btns = driver.find_elements(By.XPATH, f"//ul//li//a[text()='{next_page}'] | //div//a[text()='{next_page}']")
+                    for b in btns:
+                        if b.is_displayed():
+                            driver.execute_script("arguments[0].click();", b)
+                            st.toast(f"⚡ Page {next_page}...")
                             time.sleep(4)
                             clicked = True
                             page += 1
                             break
                 
-                # ƯU TIÊN 3: TEXT ">"
+                # Text >
                 if not clicked:
-                    arrows = driver.find_elements(By.XPATH, "//li[contains(@class,'next')]/a | //a[contains(text(), '>')]")
-                    for arr in arrows:
-                        if arr.is_displayed():
-                            driver.execute_script("arguments[0].click();", arr)
-                            st.toast("⚡ Bấm Next...")
+                    arrs = driver.find_elements(By.XPATH, "//li[contains(@class,'next')]/a | //a[contains(text(), '>')]")
+                    for a in arrs:
+                        if a.is_displayed():
+                            driver.execute_script("arguments[0].click();", a)
+                            st.toast("⚡ Next...")
                             time.sleep(4)
                             clicked = True
                             page += 1
@@ -219,18 +237,18 @@ def get_web_content_selenium(url, max_pages=15):
                 if not clicked: break
             except: break
         
-        return "\n".join(collected_data)[:600000]
+        return "\n".join(collected_data)[:600000], None
 
-    except Exception as e: return None
+    except Exception as e: 
+        return None, str(e)
     finally:
         if driver: driver.quit()
 
 # ==============================================================================
-# 4. AI PHÂN TÍCH (MULTI-KEY ROTATION)
+# 4. AI PHÂN TÍCH (PROMPT CHỐNG BỊA)
 # ==============================================================================
 def analyze_content(text):
-    # Trộn danh sách key để dùng ngẫu nhiên
-    random.shuffle(API_KEYS)
+    genai.configure(api_key=MY_API_KEY)
     
     models_to_try = [
         "models/gemini-2.5-flash-lite",      # Ưu tiên 1
@@ -241,7 +259,7 @@ def analyze_content(text):
 
     
     prompt = f"""
-    Dữ liệu thô từ nguồn (Web hoặc File):
+    Từ dữ liệu thô từ nguồn (Web hoặc File):
     ---
     {text}
     ---
@@ -256,7 +274,6 @@ def analyze_content(text):
     3. Phân tích câu từ rồi Phân loại ra 4 nhóm: Tích cực, Tiêu cực, Trung lập, Thắc mắc.
     4. Đếm Topic (Chủ đề được người dùng nhắc tới).
     5. Đưa ra giải pháp cho cửa hàng để khắc phục các vấn đề gặp phải.
-
 
     Output JSON strict:
     {{
@@ -274,25 +291,14 @@ def analyze_content(text):
     safety = {HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE, HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE, HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE, HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE}
     config = GenerationConfig(temperature=0.3, response_mime_type="application/json")
     
-    # LOGIC VÒNG LẶP KEY: KEY NÀY CHẾT THÌ THỬ KEY KHÁC
-    for key in API_KEYS:
-        # Nếu key là chuỗi rỗng thì bỏ qua
-        if "KEY_THU" in key or key.strip() == "": continue
-        
+    for model_name in models_to_try:
         try:
-            genai.configure(api_key=key)
+            model = genai.GenerativeModel(model_name, safety_settings=safety, generation_config=config)
+            response = model.generate_content(prompt)
+            return json.loads(response.text)
+        except Exception: continue
             
-            # Thử từng model với Key hiện tại
-            for model_name in models_to_try:
-                try:
-                    model = genai.GenerativeModel(model_name, safety_settings=safety, generation_config=config)
-                    response = model.generate_content(prompt)
-                    return json.loads(response.text) # Thành công trả về ngay
-                except Exception: continue # Model này lỗi thì thử model khác cùng key
-                
-        except Exception: continue # Key này lỗi thì thử key khác
-            
-    return {"error": "Tất cả API Key đều bận hoặc hết hạn mức. Vui lòng thêm Key mới."}
+    return {"error": "Hệ thống bận. Vui lòng thử lại sau."}
 
 def generate_excel(result, url):
     output = io.BytesIO()
@@ -323,16 +329,18 @@ with st.sidebar:
     conn = sqlite3.connect(DB_NAME)
     try:
         df_hist = pd.read_sql('SELECT id, time, product_name, result_json, url FROM analyses ORDER BY id DESC LIMIT 10', conn)
-        
         if not df_hist.empty:
             for index, row in df_hist.iterrows():
-                btn_label = f"{row['time']} - {row['product_name'][:15]}..."
+                # Fix lỗi hiển thị tên None
+                p_name = row['product_name'] if row['product_name'] else "Không tên"
+                btn_label = f"{row['time']} - {str(p_name)[:15]}..."
+                
                 if st.button(btn_label, key=f"hist_{row['id']}", use_container_width=True):
                     try:
                         st.session_state['analysis_result'] = json.loads(row['result_json'])
                         st.session_state['source_url'] = row['url']
                         st.rerun()
-                    except: st.error("Lỗi tải lịch sử")
+                    except: pass
         else:
             st.info("Chưa có lịch sử.")
     except Exception as e: st.error(f"Lỗi DB: {e}")
@@ -350,12 +358,12 @@ if 'analysis_result' not in st.session_state: st.session_state['analysis_result'
 if 'source_url' not in st.session_state: st.session_state['source_url'] = ""
 
 if st.session_state['analysis_result'] is None:
-    st.markdown('<div class="hero-title">AI Insight Analyser</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="hero-subtitle">Model: Gemini 2.5 Flash Lite • Multi-Key Engine</div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero-title">AI Insight Universal</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="hero-subtitle">Model: Gemini 2.5 Flash Lite • Quét đa năng mọi nền tảng</div>', unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns(3)
     with c1: st.markdown('<div class="feature-card">🕷️ <b>Quét Đa Năng</b><br><span style="font-size:12px;color:#888">Tự động bấm nút Xem thêm trên mọi web.</span></div>', unsafe_allow_html=True)
-    with c2: st.markdown('<div class="feature-card">⚡ <b>Multi-Key</b><br><span style="font-size:12px;color:#888">Tự động đổi API Key khi bị giới hạn.</span></div>', unsafe_allow_html=True)
+    with c2: st.markdown('<div class="feature-card">⚡ <b>Gemini 2.5 Lite</b><br><span style="font-size:12px;color:#888">Model mới nhất, tốc độ cao, chính xác.</span></div>', unsafe_allow_html=True)
     with c3: st.markdown('<div class="feature-card">📊 <b>Báo Cáo Sâu</b><br><span style="font-size:12px;color:#888">Phân loại 4 nhóm & Xuất Excel.</span></div>', unsafe_allow_html=True)
     
     st.write("")
@@ -366,7 +374,7 @@ if st.session_state['analysis_result'] is None:
         if st.button("🚀 BẮT ĐẦU PHÂN TÍCH", use_container_width=True):
             if url_input:
                 with st.status(f"🕷️ Đang quét dữ liệu ({page_limit} trang)...", expanded=True) as status:
-                    fetched = get_web_content_selenium(url_input, max_pages=page_limit)
+                    fetched, error_msg = get_web_content_selenium(url_input, max_pages=page_limit)
                     if fetched and len(fetched) > 1000:
                         status.write(f"✅ Đã tải xong! Tổng dung lượng: {len(fetched)} ký tự. Đang gửi AI...")
                         res = analyze_content(fetched)
@@ -374,15 +382,17 @@ if st.session_state['analysis_result'] is None:
                         st.session_state['source_url'] = url_input
                         
                         conn = sqlite3.connect(DB_NAME)
+                        safe_name = res.get('product_name') or "Không tên"
                         conn.execute("INSERT INTO analyses (product_name, url, result_json, time) VALUES (?,?,?,?)",
-                                     (res.get('product_name'), url_input, json.dumps(res), datetime.now().strftime("%H:%M %d/%m")))
+                                     (safe_name, url_input, json.dumps(res), datetime.now().strftime("%H:%M %d/%m")))
                         conn.commit()
                         conn.close()
                         
                         st.rerun()
                     else:
                         status.update(label="❌ Thất bại", state="error")
-                        st.error("Không lấy được dữ liệu.")
+                        if error_msg: st.error(f"Lỗi: {error_msg}")
+                        else: st.error("Không lấy được dữ liệu.")
             else: st.warning("Vui lòng nhập Link!")
     
     with tab_file:
@@ -391,15 +401,15 @@ if st.session_state['analysis_result'] is None:
             if st.button("PHÂN TÍCH FILE", type="primary", use_container_width=True):
                 with st.spinner("📂 Đang đọc và phân tích file..."):
                     file_text = process_uploaded_file(uploaded_file)
-                    # Chấp nhận file > 0 ký tự
                     if file_text and len(file_text.strip()) > 0:
                         res = analyze_content(file_text)
                         st.session_state['analysis_result'] = res
                         st.session_state['source_url'] = f"File: {uploaded_file.name}"
                         
                         conn = sqlite3.connect(DB_NAME)
+                        safe_name = res.get('product_name') or f"File: {uploaded_file.name}"
                         conn.execute("INSERT INTO analyses (product_name, url, result_json, time) VALUES (?,?,?,?)",
-                                     (res.get('product_name'), f"File: {uploaded_file.name}", json.dumps(res), datetime.now().strftime("%H:%M %d/%m")))
+                                     (safe_name, f"File: {uploaded_file.name}", json.dumps(res), datetime.now().strftime("%H:%M %d/%m")))
                         conn.commit()
                         conn.close()
 
@@ -409,7 +419,10 @@ if st.session_state['analysis_result'] is None:
 
 else:
     res = st.session_state['analysis_result']
+    
+    # SỬA LỖI VALUE ERROR (Đảm bảo có đủ 3 biến)
     c_back, c_space, c_excel = st.columns([1, 3, 2])
+    
     with c_back:
         if st.button("⬅️ Quay lại"):
             st.session_state['analysis_result'] = None
