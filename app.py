@@ -26,7 +26,7 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold, Generati
 # ==============================================================================
 # 1. CẤU HÌNH & CSS (DARK MODE - UI CHUẨN)
 # ==============================================================================
-st.set_page_config(page_title="AI Insight Universal", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="AI Insight Analyser", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
