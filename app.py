@@ -350,7 +350,7 @@ if 'analysis_result' not in st.session_state: st.session_state['analysis_result'
 if 'source_url' not in st.session_state: st.session_state['source_url'] = ""
 
 if st.session_state['analysis_result'] is None:
-    st.markdown('<div class="hero-title">AI Insight Universal</div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero-title">AI Insight Analyser</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="hero-subtitle">Model: Gemini 2.5 Flash Lite • Multi-Key Engine</div>', unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns(3)
