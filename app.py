@@ -27,7 +27,7 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold, Generati
 # ==============================================================================
 # 1. CẤU HÌNH & CSS
 # ==============================================================================
-st.set_page_config(page_title="AI Insight Universal", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Customer Feedback Analyser", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -46,9 +46,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# API KEY
-MY_API_KEY = "AIzaSyDcaYZe7v1d-60ayRZ44fLoEZ3_VJPCcYI" 
-DB_NAME = 'universal_v67_final.db'
+# --- QUAN TRỌNG: LẤY KEY TỪ SECRETS (KHÔNG LỘ TRÊN GITHUB) ---
+try:
+    MY_API_KEY = st.secrets["GOOGLE_API_KEY"]
+except:
+    st.error("❌ Chưa cấu hình API Key trong Streamlit Secrets! Hãy vào phần Settings của App để thêm.")
+    st.stop()
+
+DB_NAME = 'universal_v69_secret.db'
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -83,7 +88,7 @@ def process_uploaded_file(uploaded_file):
     except Exception as e: return f"Lỗi: {str(e)}"
 
 # ==============================================================================
-# 3. CÀO WEB (AUTO PATH + FPT LAPTOP FIX)
+# 3. CÀO WEB (AUTO-PATH + LAPTOP FPT FIX)
 # ==============================================================================
 def get_web_content_selenium(url, max_pages=15):
     driver = None
@@ -100,7 +105,7 @@ def get_web_content_selenium(url, max_pages=15):
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920,1080")
         
-        # --- TỰ ĐỘNG TÌM PATH CHROMIUM ---
+        # Auto-detect Chromium Path (Fix Cloud)
         chromium_path = shutil.which("chromium")
         chromedriver_path = shutil.which("chromedriver") or shutil.which("chromium-driver")
         
@@ -117,41 +122,34 @@ def get_web_content_selenium(url, max_pages=15):
         driver.get(url)
         time.sleep(5)
         
-        # --- CUỘN CHẬM ĐỂ KÍCH HOẠT LAZY LOAD ---
+        # Cuộn chậm để load dữ liệu
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 3);")
         time.sleep(1)
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 1.5);")
         time.sleep(1)
         
-        # --- BƯỚC 1: TÌM NÚT "XEM ĐÁNH GIÁ" (ĐẶC TRỊ FPT) ---
+        # --- TÌM NÚT XEM ĐÁNH GIÁ (FIX FPT) ---
         try:
-            # Ưu tiên tìm vùng đánh giá trước
             target = driver.find_element(By.XPATH, "//*[contains(text(), 'Đánh giá') or contains(text(), 'Khách hàng chấm điểm')]")
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target)
             time.sleep(2)
 
-            # Các Selector hiểm hóc của FPT Laptop
             see_all = driver.find_elements(By.XPATH, """
                 //a[contains(text(), 'Xem') and contains(text(), 'đánh giá')] |
-                //a[contains(@class, 'c-btn-rate')] |
                 //div[contains(@class, 'c-rate__center')]//a |
-                //a[contains(@class, 'btn-view-all')]
+                //a[contains(@class, 'btn-view-all')] |
+                //a[contains(@class, 'c-btn-rate')]
             """)
             
-            clicked_open = False
             for btn in see_all:
                 if btn.is_displayed():
                     driver.execute_script("arguments[0].click();", btn)
-                    st.toast("⚡ Đã bấm nút mở rộng (FPT)...")
+                    st.toast("⚡ Đã bấm nút mở rộng...")
                     time.sleep(5) 
-                    clicked_open = True
                     break
-            
-            if not clicked_open:
-                st.toast("⚠️ Không thấy nút mở rộng, quét trang hiện tại.")
         except: pass
 
-        # --- BƯỚC 2: LẬT TRANG ---
+        # --- LẬT TRANG ---
         page = 1
         while page <= max_pages:
             try:
@@ -190,32 +188,21 @@ def get_web_content_selenium(url, max_pages=15):
                             page += 1
                             break
                 
-                # Text
-                if not clicked:
-                    arrs = driver.find_elements(By.XPATH, "//li[contains(@class,'next')]/a | //a[contains(text(), '>')]")
-                    for a in arrs:
-                        if a.is_displayed():
-                            driver.execute_script("arguments[0].click();", a)
-                            st.toast("⚡ Next...")
-                            time.sleep(4)
-                            clicked = True
-                            page += 1
-                            break
-
                 if not clicked: break
             except: break
         
-        return "\n".join(collected_data)[:600000], None
+        return "\n".join(collected_data)[:600000]
 
     except Exception as e: 
-        return None, str(e)
+        return None
     finally:
         if driver: driver.quit()
 
 # ==============================================================================
-# 4. AI PHÂN TÍCH (PROMPT CỤC SÚC CỦA MÀY)
+# 4. AI PHÂN TÍCH
 # ==============================================================================
 def analyze_content(text):
+    # Lấy Key từ Secrets
     genai.configure(api_key=MY_API_KEY)
     
     models_to_try = ["models/gemini-2.5-flash-lite", "models/gemini-2.5-flash", "models/gemma-3-27b", "models/gemini-1.5-flash"]
@@ -264,7 +251,6 @@ def analyze_content(text):
 
 def generate_excel(result, url):
     output = io.BytesIO()
-    # Import ở đây để đảm bảo
     try:
         import xlsxwriter
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -278,7 +264,6 @@ def generate_excel(result, url):
             pd.DataFrame(rows).to_excel(writer, sheet_name='Chi Tiết', index=False)
         return output.getvalue()
     except Exception as e:
-        st.error(f"Lỗi tạo Excel: {e} (Khả năng cao thiếu xlsxwriter trong requirements.txt)")
         return None
 
 # ==============================================================================
@@ -287,7 +272,6 @@ def generate_excel(result, url):
 
 with st.sidebar:
     st.markdown("### ⚙️ Cấu Hình")
-    # THANH TRƯỢT LỘ THIÊN
     page_limit = st.slider("Số trang muốn quét:", 1, 50, 15)
     st.info(f"Bot sẽ quét sâu {page_limit} trang.")
     
@@ -301,7 +285,6 @@ with st.sidebar:
             for index, row in df_hist.iterrows():
                 p_name = row['product_name'] if row['product_name'] else "Không tên"
                 btn_label = f"{row['time']} - {str(p_name)[:15]}..."
-                
                 if st.button(btn_label, key=f"hist_{row['id']}", use_container_width=True):
                     try:
                         st.session_state['analysis_result'] = json.loads(row['result_json'])
@@ -309,7 +292,7 @@ with st.sidebar:
                         st.rerun()
                     except: pass
         else: st.info("Chưa có lịch sử.")
-    except Exception as e: st.error(f"Lỗi DB: {e}")
+    except: pass
     conn.close()
     
     st.markdown("---")
@@ -324,8 +307,8 @@ if 'analysis_result' not in st.session_state: st.session_state['analysis_result'
 if 'source_url' not in st.session_state: st.session_state['source_url'] = ""
 
 if st.session_state['analysis_result'] is None:
-    st.markdown('<div class="hero-title">AI Insight Universal</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="hero-subtitle">Model: Gemini 2.5 Flash Lite • Quét đa năng mọi nền tảng</div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero-title">Customer Feedback Analyser</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="hero-subtitle">Model: Gemini 2.5 • Quét đa năng mọi nền tảng</div>', unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns(3)
     with c1: st.markdown('<div class="feature-card">🕷️ <b>Quét Đa Năng</b><br><span style="font-size:12px;color:#888">Tự động bấm nút Xem thêm trên mọi web.</span></div>', unsafe_allow_html=True)
@@ -340,7 +323,7 @@ if st.session_state['analysis_result'] is None:
         if st.button("🚀 BẮT ĐẦU PHÂN TÍCH", use_container_width=True):
             if url_input:
                 with st.status(f"🕷️ Đang quét dữ liệu ({page_limit} trang)...", expanded=True) as status:
-                    fetched, error_msg = get_web_content_selenium(url_input, max_pages=page_limit)
+                    fetched = get_web_content_selenium(url_input, max_pages=page_limit)
                     if fetched and len(fetched) > 1000:
                         status.write(f"✅ Đã tải xong! Tổng dung lượng: {len(fetched)} ký tự. Đang gửi AI...")
                         res = analyze_content(fetched)
@@ -353,12 +336,10 @@ if st.session_state['analysis_result'] is None:
                                      (safe_name, url_input, json.dumps(res), datetime.now().strftime("%H:%M %d/%m")))
                         conn.commit()
                         conn.close()
-                        
                         st.rerun()
                     else:
                         status.update(label="❌ Thất bại", state="error")
-                        if error_msg: st.error(f"Lỗi: {error_msg}")
-                        else: st.error("Không lấy được dữ liệu.")
+                        st.error("Không lấy được dữ liệu.")
             else: st.warning("Vui lòng nhập Link!")
     
     with tab_file:
@@ -378,10 +359,8 @@ if st.session_state['analysis_result'] is None:
                                      (safe_name, f"File: {uploaded_file.name}", json.dumps(res), datetime.now().strftime("%H:%M %d/%m")))
                         conn.commit()
                         conn.close()
-
                         st.rerun()
-                    else:
-                        st.error("File rỗng!")
+                    else: st.error("File rỗng!")
 
 else:
     res = st.session_state['analysis_result']
@@ -395,7 +374,7 @@ else:
         if excel_data:
             st.download_button("📥 TẢI BÁO CÁO EXCEL", excel_data, f"Report_{datetime.now().strftime('%d%m')}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         else:
-            st.error("Lỗi xuất file Excel (Check requirements.txt)")
+            st.error("Lỗi xuất file. Kiểm tra requirements.txt có xlsxwriter chưa.")
 
     if "error" in res: st.error(f"Lỗi AI: {res['error']}")
     else:
