@@ -10,6 +10,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 import os
 import shutil
+import random
 from datetime import datetime
 
 # Thư viện biểu đồ
@@ -46,14 +47,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# LẤY KEY TỪ SECRETS HOẶC CODE CỨNG (NẾU MÀY CHƯA SET SECRETS THÌ NÓ CHẠY KEY DƯỚI)
+# LẤY KEY TỪ SECRETS
 try:
     MY_API_KEY = st.secrets["GOOGLE_API_KEY"]
 except:
-    # NẾU KHÔNG CẤU HÌNH SECRETS, DÙNG KEY TẠM NÀY (CẨN THẬN BỊ REVOKE)
-    MY_API_KEY = "AIzaSyCpjj8i9FETosmGxrD384kotHR2mJoIv3I" 
+    MY_API_KEY = "AIzaSyCpjj8i9FETosmGxrD384kotHR2mJoIv3I" # Fallback key (dễ chết, nên dùng secrets)
 
-DB_NAME = 'universal_v70_bypass.db'
+DB_NAME = 'universal_v71_cloudflare.db'
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -88,12 +88,11 @@ def process_uploaded_file(uploaded_file):
     except Exception as e: return f"Lỗi: {str(e)}"
 
 # ==============================================================================
-# 3. CÀO WEB (ANTI-BLOCK FPT + FALLBACK)
+# 3. CÀO WEB (CLOUDFLARE BYPASS)
 # ==============================================================================
 def get_web_content_selenium(url, max_pages=15):
     driver = None
     collected_data = []
-    debug_log = []
     
     if url and not url.startswith(('http://', 'https://')):
         url = 'https://' + url
@@ -106,12 +105,11 @@ def get_web_content_selenium(url, max_pages=15):
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920,1080")
         
-        # --- CẤU HÌNH CHỐNG PHÁT HIỆN BOT ---
-        chrome_options.add_argument("--disable-blink-features=AutomationControlled") 
+        # --- QUAN TRỌNG: CÁC CỜ ĐỂ QUA MẶT CLOUDFLARE ---
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
-        # Fake User Agent xịn
-        chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
         
         # Auto-detect Path
         chromium_path = shutil.which("chromium")
@@ -126,22 +124,29 @@ def get_web_content_selenium(url, max_pages=15):
 
         driver = webdriver.Chrome(service=service, options=chrome_options)
         
-        # Bypass detection scripts
+        # Xóa dấu vết WebDriver
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
         st.toast(f"🌐 Đang truy cập: {url}")
         driver.get(url)
-        time.sleep(5)
         
-        debug_log.append(f"Title: {driver.title}")
+        # --- CHỜ CLOUDFLARE (QUAN TRỌNG NHẤT) ---
+        st.toast("⏳ Đang chờ Cloudflare xác thực (15s)...")
+        time.sleep(15) # Bot nằm im chờ qua cửa
         
-        # Cuộn trang
+        # Kiểm tra nếu vẫn dính Just a moment thì reload thử 1 phát
+        if "Just a moment" in driver.title:
+            st.toast("⚠️ Vẫn bị chặn, thử tải lại trang...")
+            driver.refresh()
+            time.sleep(10)
+
+        # Cuộn trang để load nội dung thật
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 3);")
-        time.sleep(1)
+        time.sleep(2)
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 1.5);")
-        time.sleep(1)
+        time.sleep(2)
         
-        # --- TÌM NÚT XEM ĐÁNH GIÁ ---
+        # --- TÌM NÚT XEM ĐÁNH GIÁ (FPT SPECIFIC) ---
         try:
             target = driver.find_element(By.XPATH, "//*[contains(text(), 'Đánh giá') or contains(text(), 'Khách hàng chấm điểm')]")
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target)
@@ -166,13 +171,15 @@ def get_web_content_selenium(url, max_pages=15):
         page = 1
         while page <= max_pages:
             try:
-                # Lấy toàn bộ body text (Phương án an toàn nhất)
+                # Lấy nội dung
                 content = driver.find_element(By.TAG_NAME, "body").text
-                collected_data.append(f"\n--- PAGE {page} ---\n{content}")
+                # Lọc bớt rác Cloudflare nếu có
+                if "Just a moment" not in content[:200]:
+                    collected_data.append(f"\n--- PAGE {page} ---\n{content}")
             except: pass
 
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight - 600);")
-            time.sleep(1.5)
+            time.sleep(2)
 
             try:
                 clicked = False
@@ -185,7 +192,7 @@ def get_web_content_selenium(url, max_pages=15):
                     try:
                         driver.execute_script("arguments[0].click();", vis_svgs[-1])
                         st.toast(f"⚡ SVG Next ({next_page})...")
-                        time.sleep(4)
+                        time.sleep(5) # Chờ load trang mới lâu hơn chút
                         clicked = True
                         page += 1
                     except: pass
@@ -197,7 +204,7 @@ def get_web_content_selenium(url, max_pages=15):
                         if b.is_displayed():
                             driver.execute_script("arguments[0].click();", b)
                             st.toast(f"⚡ Page {next_page}...")
-                            time.sleep(4)
+                            time.sleep(5)
                             clicked = True
                             page += 1
                             break
@@ -209,7 +216,7 @@ def get_web_content_selenium(url, max_pages=15):
                         if a.is_displayed():
                             driver.execute_script("arguments[0].click();", a)
                             st.toast("⚡ Next...")
-                            time.sleep(4)
+                            time.sleep(5)
                             clicked = True
                             page += 1
                             break
@@ -219,19 +226,18 @@ def get_web_content_selenium(url, max_pages=15):
         
         full_text = "\n".join(collected_data)[:600000]
         
-        # CHECK DỮ LIỆU CUỐI CÙNG
-        if len(full_text) < 500:
-            return None, f"Bị chặn hoặc web rỗng. Title: {driver.title}"
+        if len(full_text) < 500 or "Just a moment" in driver.title:
+            return None, f"Vẫn bị Cloudflare chặn. Title: {driver.title}"
             
         return full_text, None
 
     except Exception as e: 
-        return None, f"Error: {str(e)}"
+        return None, f"System Error: {str(e)}"
     finally:
         if driver: driver.quit()
 
 # ==============================================================================
-# 4. AI PHÂN TÍCH (PROMPT CỦA MÀY)
+# 4. AI PHÂN TÍCH
 # ==============================================================================
 def analyze_content(text):
     genai.configure(api_key=MY_API_KEY)
