@@ -25,7 +25,7 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold, Generati
 # ==============================================================================
 # 1. CẤU HÌNH & CSS (DARK MODE - UI CHUẨN)
 # ==============================================================================
-st.set_page_config(page_title="AI Insight Universal", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Customer Feedback Analyzer", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -59,7 +59,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # KEY TÍCH HỢP SẴN
-MY_API_KEY = "AIzaSyBwKuNkTgnzANIjoK5HrcEt33dVHjv2bvg"
+MY_API_KEY = "AIzaSyCpjj8i9FETosmGxrD384kotHR2mJoIv3I"
 DB_NAME = 'universal_v53_svg_readded.db'
 
 def init_db():
@@ -318,7 +318,7 @@ if 'analysis_result' not in st.session_state: st.session_state['analysis_result'
 if 'source_url' not in st.session_state: st.session_state['source_url'] = ""
 
 if st.session_state['analysis_result'] is None:
-    st.markdown('<div class="hero-title">AI Insight Analyser</div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero-title">Customer Feedback Analyzer</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="hero-subtitle">Phân tích bình luận từ các nguồn thông tin</div>', unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns(3)
