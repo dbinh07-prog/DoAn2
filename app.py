@@ -10,7 +10,6 @@ import zipfile
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
-# Thư viện biểu đồ
 import plotly.express as px
 import plotly.graph_objects as go
 
@@ -22,9 +21,6 @@ from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 from google.generativeai.types import HarmCategory, HarmBlockThreshold, GenerationConfig
 
-# ==============================================================================
-# 1. CẤU HÌNH & CSS (DARK MODE - UI CHUẨN)
-# ==============================================================================
 st.set_page_config(page_title="Customer Feedback Analyser", page_icon="💎", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
@@ -215,10 +211,10 @@ def analyze_content(text):
     genai.configure(api_key=MY_API_KEY)
     
     models_to_try = [
-        "models/gemini-2.5-flash-lite",      # Ưu tiên 1
-        "models/gemini-2.5-flash",           # Dự phòng 1
-        "models/gemma-3-27b",                # Dự phòng 2
-        "models/gemini-1.5-flash"            # Fallback an toàn
+        "models/gemini-2.5-flash-lite",     
+        "models/gemini-2.5-flash",          
+        "models/gemma-3-27b",                
+        "models/gemini-1.5-flash"           
     ]
 
     
